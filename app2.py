@@ -37,8 +37,7 @@ def hash_block(block):
     encode make json format str to UTF-8 str
     """
     poo = hashlib.sha256(json.dumps(block).encode()).hexdigest()
-    print(poo[:5] + poo[len(poo) - 5:], "kdkdOSCAR")
-    return poo[:5] + poo[len(poo) - 5:]
+    return poo
 
 
 def valid_proof(transactions, last_hash, nonce):
