@@ -1,8 +1,25 @@
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, g
 import hashlib  # use hashing function
 import json  # convert block dict to str
+import sqlite3
 
 app = Flask(__name__)
+DATABASE = "blockchain.db"
+
+
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DATABASE)
+    return db
+
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
 
 """impoting hash library"""
 
@@ -30,6 +47,28 @@ open_transactions = []
 owner = 'Beet'  # we are the owner
 
 
+# Define functions to interact with the database
+def insert_block(previous_hash, block_index, nonce):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute('''
+        INSERT INTO blocks (previous_hash, block_index, nonce)
+        VALUES (?, ?, ?)
+    ''', (previous_hash, block_index, nonce))
+    db.commit()
+    return cursor.lastrowid
+
+
+def insert_transaction(block_id, sender, recipient, amount):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute('''
+        INSERT INTO transactions (block_id, sender, recipient, amount)
+        VALUES (?, ?, ?, ?)
+    ''', (block_id, sender, recipient, amount))
+    db.commit()
+
+
 def hash_block(block):
     """
     Using hashlib sha256 algo
@@ -47,7 +86,6 @@ def valid_proof(transactions, last_hash, nonce):
     """
     guess = (str(transactions) + str(last_hash) + str(nonce)).encode()
     guess_hash = hashlib.sha256(guess).hexdigest()
-    print(guess_hash)
     return guess_hash[0:2] == '00'
 
 
@@ -66,7 +104,7 @@ def pow():
 
 def get_last_value():
     """ extracting the last element of the blockchain list """
-    return (blockchain[-1])
+    return blockchain[-1]
 
 
 def add_value(recipient, sender=owner, amount=1.0):
@@ -103,65 +141,20 @@ def mine_block():
     blockchain.append(block)
 
 
-def get_transaction_value():
-    """
-    get transaction detail from user
-    """
-    tx_recipient = input('Enter the recipient of the transaction: ')
-    tx_amount = float(input('Enter your transaction amount '))
-    return tx_recipient, tx_amount
-
-
-def get_user_choice():
-    """
-    get user choice for various action
-    """
-    user_input = input("Please give your choice here: ")
-    return user_input
-
-
-def print_block():
-    """
-    prints entire blockchain
-    """
-    for block in blockchain:
-        print("Here is your block")
-        print(block)
-
-
-# while True:
-#     print("Choose an option")
-#     print('Choose 1 for adding a new transaction')
-#     print('Choose 2 for mining a new block')
-#     print('Choose 3 for printing the blockchain')
-#     print('Choose anything else if you want to quit')
-#
-#     user_choice = int(get_user_choice())
-#     if user_choice == 1:
-#         tx_data = get_transaction_value()
-#         recipient, amount = tx_data
-#         add_value(recipient, amount=amount)
-#         print(open_transactions)
-#
-#     elif user_choice == 2:
-#         mine_block()
-#
-#     elif user_choice == 3:
-#         print_block()
-#
-#     else:
-#         break
-
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/transactions/new', methods=['GET', 'POST'])
 def new_transaction():
     if request.method == 'POST':
         # Process the form data and add the transaction
         values = request.form
+        print(values, "Values")
         add_value(values['recipient'], values['sender'], float(values['amount']))
+        print(blockchain[-1], "Block")
+        insert_transaction(blockchain[-1]["index"], values['sender'], values['recipient'], float(values["amount"]))
         return render_template('transaction_done.html')
     else:
         # Render the form for creating a new transaction
@@ -171,11 +164,14 @@ def new_transaction():
 @app.route('/mine')
 def mine():
     mine_block()
+    insert_block(blockchain[-1]["previous_hash"], blockchain[-1]["index"], blockchain[-1]["nonce"])
     response = {
         'message': "New Block Forged",
         'block': blockchain[-1]
     }
+    print(blockchain[-1])
     return jsonify(response), 200
+
 
 @app.route('/chain')
 def full_chain():
@@ -184,6 +180,7 @@ def full_chain():
         'length': len(blockchain)
     }
     return jsonify(response), 200
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
